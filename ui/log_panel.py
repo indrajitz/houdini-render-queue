@@ -60,10 +60,10 @@ class LogPanel(ttk.Frame):
     def _build(self):
         C = self._colors
         panel_bg = C.get("panel", "#252526")
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
         self.columnconfigure(0, weight=1)
 
-        # Header row
+        # Header row — row 0
         hdr_frame = tk.Frame(self, bg=panel_bg)
         hdr_frame.grid(row=0, column=0, columnspan=2, sticky=tk.EW)
         tk.Label(hdr_frame, text="RENDER LOG",
@@ -77,10 +77,11 @@ class LogPanel(ttk.Frame):
         ttk.Button(hdr_frame, text="Clear", width=6, style="Small.TButton",
                    command=self.clear).pack(side=tk.RIGHT, padx=4)
 
+        # Separator — row 1
         tk.Frame(self, height=1, bg=C.get("border", "#3e3e42")).grid(
-            row=0, column=0, columnspan=2, sticky=tk.EW, pady=(36, 0))
+            row=1, column=0, columnspan=2, sticky=tk.EW)
 
-        # Text widget
+        # Text widget — row 2
         self._text = tk.Text(
             self,
             wrap=tk.WORD,
@@ -93,10 +94,10 @@ class LogPanel(ttk.Frame):
             borderwidth=0,
             selectbackground=C.get("card_sel", "#094771"),
         )
-        self._text.grid(row=1, column=0, sticky=tk.NSEW)
+        self._text.grid(row=2, column=0, sticky=tk.NSEW)
 
         self._scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self._text.yview)
-        self._scrollbar.grid(row=1, column=1, sticky=tk.NS)
+        self._scrollbar.grid(row=2, column=1, sticky=tk.NS)
         self._text.configure(yscrollcommand=self._scrollbar.set)
 
         # Configure colour tags
@@ -145,6 +146,5 @@ class LogPanel(ttk.Frame):
             self._text.see(tk.END)
 
     def _on_manual_scroll(self, _event=None):
-        # When user manually scrolls, disable auto-scroll
-        # (they can re-enable via the checkbox)
-        pass
+        self._auto_scroll = False
+        self._auto_scroll_var.set(False)

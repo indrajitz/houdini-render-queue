@@ -41,16 +41,11 @@ class MainWindow(ttk.Frame):
 
     def _build(self):
         C = self._colors
-        bg = C.get("bg", "#1e1e1e")
         self.configure(style="TFrame")
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)   # row 0=toolbar, 1=separator, 2=paned, 3=statusbar
         self.columnconfigure(0, weight=1)
 
-        # Top border line
-        tk.Frame(self, height=1, bg=C.get("border", "#3e3e42")).grid(
-            row=0, column=0, sticky=tk.EW)
-
-        # Toolbar
+        # Toolbar — row 0
         self._toolbar = Toolbar(
             self, colors=C,
             add_job=self._add_job,
@@ -67,13 +62,13 @@ class MainWindow(ttk.Frame):
         )
         self._toolbar.grid(row=0, column=0, sticky=tk.EW)
 
-        # Bottom border under toolbar
+        # Separator line — row 1
         tk.Frame(self, height=1, bg=C.get("border", "#3e3e42")).grid(
-            row=0, column=0, sticky=tk.EW, pady=(38, 0))
+            row=1, column=0, sticky=tk.EW)
 
-        # Main paned area
+        # Main paned area — row 2
         self._paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        self._paned.grid(row=1, column=0, sticky=tk.NSEW)
+        self._paned.grid(row=2, column=0, sticky=tk.NSEW)
 
         # Left — queue list
         self._queue_panel = QueuePanel(
@@ -103,9 +98,9 @@ class MainWindow(ttk.Frame):
         self._log_panel = LogPanel(right_paned, colors=C)
         right_paned.add(self._log_panel, weight=2)
 
-        # Status bar
+        # Status bar — row 3
         self._status_bar = _StatusBar(self, colors=C)
-        self._status_bar.grid(row=2, column=0, sticky=tk.EW)
+        self._status_bar.grid(row=3, column=0, sticky=tk.EW)
 
     # ── Renderer callbacks (thread-safe) ───────────────────────────────
 

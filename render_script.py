@@ -2,132 +2,182 @@
 render_script.py — Invoked by hython per render job.
 
 Usage:
-    hython render_script.py --hip /path/to/file.hip --rop /out/mantra1 \
+    hython render_script.py --hip /path/to/file.hip --rop /out/redshift1 \
         --start 1 --end 100 --step 1 [--output-dir /path/to/output]
 """
 
 import argparse
-import sys
 import os
+import sys
+
+# Output parameter names per ROP type (same map as scan_hip.py)
+_OUTPUT_PARMS = {
+    "ifd":              ["vm_picture"],
+    "opengl":           ["picture"],
+    "geometry":         ["sopoutput"],
+    "alembic":          ["filename"],
+    "comp":             ["copoutput"],
+    "filecache":        ["file"],
+    "filesave":         ["file"],
+    "karma":            ["picture"],
+    "karmarenderer":    ["picture"],
+    "usdrender":        ["outputimage"],
+    "usdrenderer":      ["outputimage"],
+    "lop_usdrender":    ["outputimage"],
+    "redshift_rop":     ["RS_outputFileNamePrefix"],
+    "arnold":           ["ar_picture"],
+    "arnold_rop":       ["ar_picture"],
+    "htoa_rop":         ["ar_picture"],
+    "octanerenderer":   ["houdini_outputimage", "outputimage", "filename"],
+    "octane_rop":       ["houdini_outputimage", "outputimage", "filename"],
+    "octane":           ["houdini_outputimage", "outputimage", "filename"],
+    "OctaneRop":        ["houdini_outputimage", "outputimage", "filename"],
+    "vray_renderer":    ["SettingsOutput_img_file", "filename"],
+    "ris":              ["ri_display_0"],
+    "prman":            ["ri_display_0"],
+    "pbrt":             ["filename"],
+}
+
+_FALLBACK_PARMS = [
+    "picture", "vm_picture", "outputimage", "filename",
+    "sopoutput", "file", "RS_outputFileNamePrefix", "ar_picture",
+    "houdini_outputimage",
+]
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Houdini render script for render queue")
-    parser.add_argument("--hip", required=True, help="Path to the .hip/.hipnc file")
-    parser.add_argument("--rop", required=True, help="ROP node path (e.g. /out/mantra1)")
-    parser.add_argument("--start", type=float, required=True, help="Start frame")
-    parser.add_argument("--end", type=float, required=True, help="End frame")
-    parser.add_argument("--step", type=float, default=1.0, help="Frame step")
-    parser.add_argument("--output-dir", default="", help="Override output directory for the ROP")
-    return parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--hip",        required=True)
+    p.add_argument("--rop",        required=True)
+    p.add_argument("--start",      type=float, required=True)
+    p.add_argument("--end",        type=float, required=True)
+    p.add_argument("--step",       type=float, default=1.0)
+    p.add_argument("--output-dir", default="")
+    return p.parse_args()
 
 
-def get_output_parms(rop_node):
-    """Return list of parameter names that control output file path for common ROPs."""
-    rop_type = rop_node.type().name()
-    parm_map = {
-        "ifd": ["vm_picture"],          # Mantra
-        "opengl": ["picture"],          # OpenGL
-        "arnold": ["ar_picture"],       # Arnold
-        "karma": ["picture"],           # Karma (USD)
-        "ris": ["ri_display_0"],        # RenderMan
-        "redshift_rop": ["RS_outputFileNamePrefix"],  # Redshift
-        "geometry": ["sopoutput"],      # Geometry cache
-        "alembic": ["filename"],        # Alembic
-        "comp": ["copoutput"],          # Compositing
-        "filecache": ["file"],          # File cache
-        "filesave": ["file"],           # File save
-    }
-    return parm_map.get(rop_type, ["picture", "vm_picture", "sopoutput", "filename"])
+def get_output_parm(rop_node):
+    rop_type   = rop_node.type().name()
+    candidates = _OUTPUT_PARMS.get(rop_type, []) + _FALLBACK_PARMS
+    seen = set()
+    for pname in candidates:
+        if pname in seen:
+            continue
+        seen.add(pname)
+        parm = rop_node.parm(pname)
+        if parm is not None:
+            return parm
+    return None
 
 
-def override_output_dir(rop_node, output_dir):
-    """Override the ROP's output path to use the given directory."""
+def override_output_dir(rop_node, output_dir: str):
     if not output_dir:
         return
-
     output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    candidate_parms = get_output_parms(rop_node)
+    parm = get_output_parm(rop_node)
+    if parm is None:
+        print(f"[RenderQueue] WARNING: Could not find output parm on {rop_node.type().name()}, "
+              "output directory override skipped.", flush=True)
+        return
 
-    for parm_name in candidate_parms:
-        parm = rop_node.parm(parm_name)
-        if parm is not None:
-            current = parm.unexpandedString()
-            if current:
-                # Replace directory portion, keep filename/expression
-                basename = os.path.basename(current)
-                # Handle cases where the path has frame expressions like $F4
-                new_path = os.path.join(output_dir, basename).replace("\\", "/")
-                parm.set(new_path)
-                print(f"[RenderQueue] Output path overridden: {parm_name} = {new_path}", flush=True)
-            break
+    current = parm.unexpandedString()
+    basename = os.path.basename(current) if current else "render.$F4.exr"
+    new_path = os.path.join(output_dir, basename).replace("\\", "/")
+    parm.set(new_path)
+    print(f"[RenderQueue] Output override: {parm.name()} = {new_path}", flush=True)
 
 
 def render_job(args):
     import hou  # noqa: only available inside hython
 
-    print(f"[RenderQueue] Loading hip file: {args.hip}", flush=True)
+    print(f"[RenderQueue] Loading: {args.hip}", flush=True)
     hou.hipFile.load(args.hip, suppress_save_prompt=True, ignore_load_warnings=False)
-    print(f"[RenderQueue] Hip file loaded.", flush=True)
+    print("[RenderQueue] Hip file loaded.", flush=True)
 
     rop_node = hou.node(args.rop)
     if rop_node is None:
-        print(f"[RenderQueue] ERROR: ROP node not found: {args.rop}", flush=True)
+        print(f"[RenderQueue] ERROR: ROP not found: {args.rop}", flush=True)
         sys.exit(1)
 
-    print(f"[RenderQueue] Found ROP: {rop_node.path()} (type: {rop_node.type().name()})", flush=True)
+    rop_type = rop_node.type().name()
+    print(f"[RenderQueue] ROP: {rop_node.path()}  type={rop_type}", flush=True)
 
     if args.output_dir:
         override_output_dir(rop_node, args.output_dir)
 
-    # Build frame list
     start = int(args.start)
-    end = int(args.end)
-    step = max(1, int(args.step))
+    end   = int(args.end)
+    step  = max(1, int(args.step))
     frames = list(range(start, end + 1, step))
-    total_frames = len(frames)
+    total  = len(frames)
+    print(f"[RenderQueue] Frames {start}–{end} step {step}  ({total} frames)", flush=True)
 
-    print(f"[RenderQueue] Rendering frames {start}-{end} step {step} ({total_frames} frames)", flush=True)
+    # Show resolved output path
+    parm = get_output_parm(rop_node)
+    if parm:
+        try:
+            resolved = rop_node.parm(parm.name()).eval()
+            print(f"[RenderQueue] Output: {parm.unexpandedString()}", flush=True)
+        except Exception:
+            pass
 
-    def frame_start_cb(kwargs):
-        frame = int(kwargs.get("frame", 0))
-        idx = frames.index(frame) + 1 if frame in frames else "?"
-        print(f"[RenderQueue] FRAME_START {frame} ({idx}/{total_frames})", flush=True)
+    # ── Render ────────────────────────────────────────────────────────────
+    # We render frame-by-frame so we can emit progress markers.
+    # Some third-party renderers (Redshift, Octane) support standard
+    # hou.RopNode.render(); others may need special handling.
 
-    def frame_end_cb(kwargs):
-        frame = int(kwargs.get("frame", 0))
-        idx = frames.index(frame) + 1 if frame in frames else "?"
-        print(f"[RenderQueue] FRAME_DONE {frame} ({idx}/{total_frames})", flush=True)
+    rop_type_lower = rop_type.lower()
 
-    # Render using renderFrames for fine-grained control
+    for i, frame in enumerate(frames, 1):
+        print(f"[RenderQueue] FRAME_START {frame}  ({i}/{total})", flush=True)
+        try:
+            _render_frame(rop_node, frame, rop_type_lower)
+        except Exception as exc:
+            print(f"[RenderQueue] ERROR frame {frame}: {exc}", flush=True)
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        print(f"[RenderQueue] FRAME_DONE {frame}  ({i}/{total})", flush=True)
+
+    print("[RenderQueue] RENDER_COMPLETE", flush=True)
+
+
+def _render_frame(rop_node, frame: int, rop_type_lower: str):
+    """Render a single frame, using the best method for the ROP type."""
+    import hou
+
+    # Set the current frame
+    hou.setFrame(frame)
+
     try:
-        # Try rendering with callbacks for progress
+        # Standard approach — works for Mantra, Redshift, Arnold, Karma, Octane, V-Ray
         rop_node.render(
-            frame_range=(start, end, step),
+            frame_range=(frame, frame, 1),
             ignore_inputs=False,
-            method=hou.renderMethod.FrameByFrame,
             verbose=True,
             output_progress=True,
         )
     except TypeError:
-        # Older Houdini versions may not accept all kwargs
-        rop_node.render(frame_range=(start, end, step))
-
-    print(f"[RenderQueue] RENDER_COMPLETE", flush=True)
+        # Older Houdini / some third-party renderers may not accept all kwargs
+        try:
+            rop_node.render(frame_range=(frame, frame, 1))
+        except TypeError:
+            rop_node.render()
 
 
 def main():
     args = parse_args()
 
-    # Validate file exists
     if not os.path.isfile(args.hip):
         print(f"[RenderQueue] ERROR: Hip file not found: {args.hip}", flush=True)
         sys.exit(1)
 
     try:
         render_job(args)
+    except SystemExit:
+        raise
     except Exception as exc:
         print(f"[RenderQueue] ERROR: {exc}", flush=True)
         import traceback

@@ -12,13 +12,89 @@ import argparse
 import json
 import sys
 
+# Output parameter for each ROP type.  Values can be a list — first one found wins.
+_OUTPUT_PARMS = {
+    # Native Houdini
+    "ifd":                  ["vm_picture"],
+    "opengl":               ["picture"],
+    "geometry":             ["sopoutput"],
+    "alembic":              ["filename"],
+    "comp":                 ["copoutput"],
+    "filecache":            ["file"],
+    "filesave":             ["file"],
+    "channel":              ["chanfile"],
+    "dop":                  ["dopoutput"],
 
-def scan_rop(node):
+    # Karma / USD
+    "karma":                ["picture"],
+    "karmarenderer":        ["picture"],
+    "usdrender":            ["outputimage"],
+    "usdrenderer":          ["outputimage"],
+    "lop_usdrender":        ["outputimage"],
+
+    # Redshift
+    "redshift_rop":         ["RS_outputFileNamePrefix", "RS_outputFileNamePrefix"],
+
+    # Arnold
+    "arnold":               ["ar_picture"],
+    "arnold_rop":           ["ar_picture"],
+    "htoa_rop":             ["ar_picture"],
+
+    # Octane
+    "octanerenderer":       ["houdini_outputimage", "outputimage", "filename"],
+    "octane_rop":           ["houdini_outputimage", "outputimage", "filename"],
+    "octane":               ["houdini_outputimage", "outputimage", "filename"],
+    "OctaneRop":            ["houdini_outputimage", "outputimage", "filename"],
+
+    # V-Ray
+    "vray_renderer":        ["SettingsOutput_img_file", "filename"],
+
+    # RenderMan / PRMan
+    "ris":                  ["ri_display_0", "filename"],
+    "prman":                ["ri_display_0", "filename"],
+
+    # PBRT
+    "pbrt":                 ["filename"],
+
+    # Maxwell
+    "maxwell_render":       ["output_mxi_file", "filename"],
+
+    # Renderman XPU
+    "ipr_ris":              ["ri_display_0"],
+
+    # Cycles
+    "cycles":               ["picture", "filename"],
+}
+
+# Generic fallback parm names tried if type isn't in map
+_FALLBACK_PARMS = [
+    "picture", "vm_picture", "outputimage", "filename",
+    "sopoutput", "file", "RS_outputFileNamePrefix",
+    "ar_picture", "houdini_outputimage",
+]
+
+
+def _get_output_path(node) -> str:
+    rop_type = node.type().name()
+    candidates = _OUTPUT_PARMS.get(rop_type, []) + _FALLBACK_PARMS
+    seen = set()
+    for pname in candidates:
+        if pname in seen:
+            continue
+        seen.add(pname)
+        parm = node.parm(pname)
+        if parm is not None:
+            val = parm.unexpandedString()
+            if val:
+                return val
+    return ""
+
+
+def _get_frame_range(node):
+    """Read the node's own frame range, falling back to scene globals."""
+    frame_start, frame_end, frame_step = 1, 100, 1
     try:
-        rop_type = node.type().name()
-
-        # Frame range — read from node's trange parm
-        frame_start, frame_end, frame_step = 1, 100, 1
+        import hou
         trange = node.parm("trange")
         if trange is not None and int(trange.eval()) > 0:
             f1 = node.parm("f1")
@@ -30,63 +106,50 @@ def scan_rop(node):
                 frame_end = int(f2.eval())
             if f3:
                 frame_step = max(1, int(f3.eval()))
+        else:
+            # Fall back to scene playback range
+            frame_start = int(hou.playbar.playbackRange()[0])
+            frame_end   = int(hou.playbar.playbackRange()[1])
+    except Exception:
+        pass
+    return frame_start, frame_end, frame_step
 
-        # Output path — check type-specific parms, then generic fallbacks
-        output_parm_map = {
-            "ifd":               "vm_picture",
-            "opengl":            "picture",
-            "arnold":            "ar_picture",
-            "karma":             "picture",
-            "karmarenderer":     "picture",
-            "ris":               "ri_display_0",
-            "redshift_rop":      "RS_outputFileNamePrefix",
-            "geometry":          "sopoutput",
-            "alembic":           "filename",
-            "comp":              "copoutput",
-            "filecache":         "file",
-            "filesave":          "file",
-            "usdrender":         "outputimage",
-            "usdrenderer":       "outputimage",
-            "pbrt":              "filename",
-            "vray_renderer":     "SettingsOutput_img_file",
-        }
-        output_path = ""
-        pname = output_parm_map.get(rop_type)
-        if pname:
-            parm = node.parm(pname)
-            if parm:
-                output_path = parm.unexpandedString()
-        if not output_path:
-            for fallback in ("picture", "vm_picture", "sopoutput", "filename",
-                             "outputimage", "file", "copoutput"):
-                parm = node.parm(fallback)
-                if parm:
-                    output_path = parm.unexpandedString()
-                    break
 
+def scan_rop(node) -> dict:
+    try:
+        rop_type  = node.type().name()
+        fs, fe, fstep = _get_frame_range(node)
         return {
             "path":        node.path(),
             "type":        rop_type,
             "label":       node.name(),
-            "frame_start": frame_start,
-            "frame_end":   frame_end,
-            "frame_step":  frame_step,
-            "output_path": output_path,
+            "frame_start": fs,
+            "frame_end":   fe,
+            "frame_step":  fstep,
+            "output_path": _get_output_path(node),
         }
-    except Exception as exc:
-        return None
+    except Exception:
+        return {}
 
 
-def collect_rops(root):
+def _is_rop(node) -> bool:
+    """True if the node is a render output driver (ROP)."""
+    try:
+        return node.type().category().name() == "Driver"
+    except Exception:
+        return False
+
+
+def collect_rops(context_node) -> list:
     rops = []
-    for node in root.children():
-        # Skip subnet-like nodes but recurse into them
-        cat = node.type().category().name()
-        if cat == "Driver":
+    if context_node is None:
+        return rops
+    for node in context_node.children():
+        if _is_rop(node):
             info = scan_rop(node)
             if info:
                 rops.append(info)
-        # Recurse into subnet ROPs
+        # Recurse into subnets / ropnets
         if node.type().name() in ("subnet", "ropnet"):
             rops.extend(collect_rops(node))
     return rops
@@ -94,7 +157,7 @@ def collect_rops(root):
 
 def main():
     parser = argparse.ArgumentParser(description="Scan Houdini .hip for ROPs")
-    parser.add_argument("--hip", required=True, help="Path to .hip file")
+    parser.add_argument("--hip", required=True)
     args = parser.parse_args()
 
     import hou  # noqa: only available inside hython
@@ -103,24 +166,21 @@ def main():
 
     rops = []
 
-    out = hou.node("/out")
-    if out:
-        rops.extend(collect_rops(out))
+    # Primary: /out context
+    rops.extend(collect_rops(hou.node("/out")))
 
-    # Also scan /stage for Solaris/USD render nodes
-    stage = hou.node("/stage")
-    if stage:
-        try:
-            import hou
-            for node in stage.allSubChildren():
-                if node.type().category().name() == "Driver":
-                    info = scan_rop(node)
-                    if info:
-                        rops.append(info)
-        except Exception:
-            pass
+    # Solaris/USD: /stage
+    rops.extend(collect_rops(hou.node("/stage")))
 
-    print(json.dumps({"rops": rops}), flush=True)
+    # Remove duplicates by path
+    seen_paths = set()
+    unique = []
+    for r in rops:
+        if r.get("path") not in seen_paths:
+            seen_paths.add(r["path"])
+            unique.append(r)
+
+    print(json.dumps({"rops": unique}), flush=True)
 
 
 if __name__ == "__main__":
