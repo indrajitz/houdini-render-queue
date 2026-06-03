@@ -51,40 +51,47 @@ class LogPanel(ttk.Frame):
     Call set_job_log(text) to replace the full content.
     """
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
+    def __init__(self, parent, colors: dict = None, **kwargs):
+        super().__init__(parent, style="Panel.TFrame", **kwargs)
+        self._colors = colors or {}
         self._build()
         self._auto_scroll = True
 
     def _build(self):
+        C = self._colors
+        panel_bg = C.get("panel", "#252526")
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1)
 
         # Header row
-        hdr_frame = ttk.Frame(self)
+        hdr_frame = tk.Frame(self, bg=panel_bg)
         hdr_frame.grid(row=0, column=0, columnspan=2, sticky=tk.EW)
-        ttk.Label(hdr_frame, text="RENDER LOG",
-                  font=("Segoe UI", 9, "bold"), foreground="#6a8fb0").pack(side=tk.LEFT, padx=8, pady=(6, 2))
+        tk.Label(hdr_frame, text="RENDER LOG",
+                 bg=panel_bg, fg=C.get("text_dim", "#858585"),
+                 font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=10, pady=(8, 4))
 
         self._auto_scroll_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(hdr_frame, text="Auto-scroll",
                         variable=self._auto_scroll_var,
                         command=self._toggle_auto_scroll).pack(side=tk.RIGHT, padx=8)
-        ttk.Button(hdr_frame, text="Clear", width=6,
+        ttk.Button(hdr_frame, text="Clear", width=6, style="Small.TButton",
                    command=self.clear).pack(side=tk.RIGHT, padx=4)
+
+        tk.Frame(self, height=1, bg=C.get("border", "#3e3e42")).grid(
+            row=0, column=0, columnspan=2, sticky=tk.EW, pady=(36, 0))
 
         # Text widget
         self._text = tk.Text(
             self,
             wrap=tk.WORD,
             state=tk.DISABLED,
-            bg="#1e1e1e",
-            fg="#c8c8c8",
+            bg=C.get("log_bg", "#1a1a1a"),
+            fg=C.get("text", "#d4d4d4"),
             font=("Courier New", 9),
-            insertbackground="#c8c8c8",
+            insertbackground=C.get("text", "#d4d4d4"),
             relief=tk.FLAT,
             borderwidth=0,
-            selectbackground="#3d6b9e",
+            selectbackground=C.get("card_sel", "#094771"),
         )
         self._text.grid(row=1, column=0, sticky=tk.NSEW)
 

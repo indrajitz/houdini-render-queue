@@ -1,7 +1,12 @@
 # Houdini Render Queue
-# All dependencies are Python standard library only.
-# No third-party packages required.
+#
+# Core functionality uses only the Python standard library.
+#
+# Optional — install for OS-level file drag-and-drop (.hip → queue):
+#   pip install tkinterdnd2
 #
 # Runtime requirements:
 #   - Python 3.8+  (tkinter included in most distributions)
-#   - Houdini with hython available on PATH (or configured in settings)
+#   - Houdini with hython on PATH (or set HYTHON_PATH env var)
+
+tkinterdnd2>=0.3.0   # optional: enables dragging .hip files from Finder / Explorer

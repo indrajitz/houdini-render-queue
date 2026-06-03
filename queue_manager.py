@@ -29,6 +29,7 @@ class RenderJob:
     frame_end: int = 100
     frame_step: int = 1
     output_dir: str = ""
+    rop_output_path: str = ""   # native output path read from the ROP (display only)
     priority: int = 50          # 1 (highest) – 100 (lowest)
     enabled: bool = True
     label: str = ""             # Optional friendly name
@@ -65,6 +66,7 @@ class RenderJob:
             "frame_end": self.frame_end,
             "frame_step": self.frame_step,
             "output_dir": self.output_dir,
+            "rop_output_path": self.rop_output_path,
             "priority": self.priority,
             "enabled": self.enabled,
             "label": self.label,
