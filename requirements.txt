@@ -1,0 +1,7 @@
+# Houdini Render Queue
+# All dependencies are Python standard library only.
+# No third-party packages required.
+#
+# Runtime requirements:
+#   - Python 3.8+  (tkinter included in most distributions)
+#   - Houdini with hython available on PATH (or configured in settings)
